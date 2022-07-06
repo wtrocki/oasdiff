@@ -47,14 +47,6 @@ type Durations struct {
 	Output  time.Duration
 }
 
-func getDurations(times Times) Durations {
-	return Durations{
-		Load:  times.Load.Sub(times.Start),
-		Diff:  times.Diff.Sub(times.Load),
-		Total: times.Diff.Sub(times.Start),
-	}
-}
-
 type Info struct {
 	Config     *diff.Config
 	Base       *SpecInfo
@@ -80,32 +72,24 @@ func diffExists(d *diff.Diff) bool {
 	return !d.Empty()
 }
 
-type Times struct {
-	Start   time.Time
-	Load    time.Time
-	Diff    time.Time
-	Summary time.Time
-	Output  time.Time
-}
-
-func GetInfo(statusCode int, config *diff.Config, base, revision string, times Times, d *diff.Diff, err error) *Info {
+func GetInfo(statusCode int, config *diff.Config, base, revision string, durations Durations, d *diff.Diff, err error) *Info {
 	return &Info{
 		Config:     config,
 		Base:       getSpecInfo(base),
 		Revision:   getSpecInfo(revision),
 		StatusCode: statusCode,
 		Diff:       diffExists(d),
-		Durations:  getDurations(times),
+		Durations:  durations,
 		Summary:    d.GetSummary(),
 		Err:        getErrStr(err),
 	}
 }
 
-func Send(info *Info) {
+func Send(info *Info, url string) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(info)
 	if err != nil {
 
 	}
-	http.Post("https://oasdiff-stats-xiixymmvca-ew.a.run.app", "application/json", &buf)
+	http.Post(url, "application/json", &buf)
 }

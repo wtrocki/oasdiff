@@ -24,6 +24,8 @@ const (
 	formatHTML = "html"
 )
 
+const statsServer = "https://oasdiff-stats-xiixymmvca-ew.a.run.app"
+
 func init() {
 	flag.StringVar(&base, "base", "", "path of original OpenAPI spec in YAML or JSON format")
 	flag.StringVar(&revision, "revision", "", "path of revised OpenAPI spec in YAML or JSON format")
@@ -78,9 +80,14 @@ func initConfig(excludeExamples bool, excludeDescription bool, filter string, fi
 	return config
 }
 
+func getTime(startTime time.Time) (time.Duration, time.Time) {
+	now := time.Now()
+	return now.Sub(startTime), now
+}
+
 func main() {
-	times := stats.Times{}
-	times.Start = time.Now()
+	times := stats.Durations{}
+	startTime := time.Now()
 
 	flag.Parse()
 
@@ -112,10 +119,11 @@ func main() {
 		exitWithError(stats.GetInfo(statusCodeLoadRevisionErr, config, base, revision, times, nil, err))
 	}
 
-	times.Load = time.Now()
+	times.Load, startTime = getTime(startTime)
 
 	diffReport, err := diff.Get(config, s1, s2)
-	times.Diff = time.Now()
+
+	times.Diff, startTime = getTime(startTime)
 
 	if err != nil {
 		fmt.Printf("diff failed with %v\n", err)
@@ -131,7 +139,7 @@ func main() {
 			Config: config,
 		})
 	}
-	times.Summary = time.Now()
+	times.Summary, startTime = getTime(startTime)
 
 	if format == formatYAML {
 		if err = printYAML(diffReport); err != nil {
@@ -151,13 +159,13 @@ func main() {
 		fmt.Printf("unknown output format %q\n", format)
 		exitWithError(stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
 	}
-	times.Output = time.Now()
+	times.Output, startTime = getTime(startTime)
 
 	exitNormally(diffReport.Empty(), stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
 }
 
 func exitNormally(diffEmpty bool, data *stats.Info) {
-	stats.Send(data)
+	stats.Send(data, statsServer)
 
 	if failOnDiff && !diffEmpty {
 		os.Exit(1)
@@ -166,7 +174,7 @@ func exitNormally(diffEmpty bool, data *stats.Info) {
 }
 
 func exitWithError(data *stats.Info) {
-	stats.Send(data)
+	stats.Send(data, statsServer)
 	os.Exit(data.StatusCode)
 }
 
