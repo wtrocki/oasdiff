@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/tufin/oasdiff/diff"
 	"github.com/tufin/oasdiff/load"
 	"github.com/tufin/oasdiff/report"
+	"github.com/tufin/oasdiff/stats"
 	"gopkg.in/yaml.v3"
 )
 
 var base, revision, prefix, filter, filterExtension, format string
-var excludeExamples, excludeDescription, summary, breakingOnly, failOnDiff bool
+var excludeExamples, excludeDescription, summary, breakingOnly, failOnDiff, sendStats bool
 
 const (
 	formatYAML = "yaml"
@@ -34,6 +36,7 @@ func init() {
 	flag.BoolVar(&breakingOnly, "breaking-only", false, "display breaking changes only")
 	flag.StringVar(&format, "format", formatYAML, "output format: yaml, text or html")
 	flag.BoolVar(&failOnDiff, "fail-on-diff", false, "fail with exit code 1 if a difference is found")
+	flag.BoolVar(&sendStats, "send-stats", false, "help us improve the diff tool by sending anonymous statistics")
 }
 
 func validateFlags() bool {
@@ -53,11 +56,45 @@ func validateFlags() bool {
 	return true
 }
 
+const (
+	statusCodeInvalidFlags    = 101
+	statusCodeLoadBaseErr     = 102
+	statusCodeLoadRevisionErr = 103
+	statusCodeDiffErr         = 104
+	statusCodeSummaryErr      = 105
+	statusCodeYAMLErr         = 106
+	statusCodeReportErr       = 107
+	statusCodeInvalidFormat   = 108
+)
+
+func initConfig(excludeExamples bool, excludeDescription bool, filter string, filterExtension string, prefix string, breakingOnly bool) *diff.Config {
+	config := diff.NewConfig()
+	config.ExcludeExamples = excludeExamples
+	config.ExcludeDescription = excludeDescription
+	config.PathFilter = filter
+	config.FilterExtension = filterExtension
+	config.PathPrefix = prefix
+	config.BreakingOnly = breakingOnly
+	return config
+}
+
 func main() {
+	times := stats.Times{}
+	times.Start = time.Now()
+
 	flag.Parse()
 
+	config := initConfig(
+		excludeExamples,
+		excludeDescription,
+		filter,
+		filterExtension,
+		prefix,
+		breakingOnly,
+	)
+
 	if !validateFlags() {
-		os.Exit(101)
+		exitWithError(stats.GetInfo(statusCodeInvalidFlags, config, base, revision, times, nil, nil))
 	}
 
 	loader := openapi3.NewLoader()
@@ -66,42 +103,40 @@ func main() {
 	s1, err := load.From(loader, base)
 	if err != nil {
 		fmt.Printf("failed to load base spec from %q with %v\n", base, err)
-		os.Exit(102)
+		exitWithError(stats.GetInfo(statusCodeLoadBaseErr, config, base, revision, times, nil, err))
 	}
 
 	s2, err := load.From(loader, revision)
 	if err != nil {
 		fmt.Printf("failed to load revision spec from %q with %v\n", revision, err)
-		os.Exit(103)
+		exitWithError(stats.GetInfo(statusCodeLoadRevisionErr, config, base, revision, times, nil, err))
 	}
 
-	config := diff.NewConfig()
-	config.ExcludeExamples = excludeExamples
-	config.ExcludeDescription = excludeDescription
-	config.PathFilter = filter
-	config.FilterExtension = filterExtension
-	config.PathPrefix = prefix
-	config.BreakingOnly = breakingOnly
+	times.Load = time.Now()
 
 	diffReport, err := diff.Get(config, s1, s2)
+	times.Diff = time.Now()
 
 	if err != nil {
 		fmt.Printf("diff failed with %v\n", err)
-		os.Exit(104)
+		exitWithError(stats.GetInfo(statusCodeDiffErr, config, base, revision, times, nil, err))
 	}
 
 	if summary {
 		if err = printYAML(diffReport.GetSummary()); err != nil {
 			fmt.Printf("failed to print summary with %v\n", err)
-			os.Exit(105)
+			exitWithError(stats.GetInfo(statusCodeSummaryErr, config, base, revision, times, diffReport, err))
 		}
-		exitNormally(diffReport.Empty())
+		exitNormally(diffReport.Empty(), &stats.Info{
+			Config: config,
+		})
 	}
+	times.Summary = time.Now()
 
 	if format == formatYAML {
 		if err = printYAML(diffReport); err != nil {
 			fmt.Printf("failed to print diff YAML with %v\n", err)
-			os.Exit(106)
+			exitWithError(stats.GetInfo(statusCodeYAMLErr, config, base, revision, times, diffReport, err))
 		}
 	} else if format == formatText {
 		fmt.Printf("%s", report.GetTextReportAsString(diffReport))
@@ -109,22 +144,30 @@ func main() {
 		html, err := report.GetHTMLReportAsString(diffReport)
 		if err != nil {
 			fmt.Printf("failed to generate HTML diff report with %v\n", err)
-			os.Exit(107)
+			exitWithError(stats.GetInfo(statusCodeReportErr, config, base, revision, times, diffReport, err))
 		}
 		fmt.Printf("%s", html)
 	} else {
 		fmt.Printf("unknown output format %q\n", format)
-		os.Exit(108)
+		exitWithError(stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
 	}
+	times.Output = time.Now()
 
-	exitNormally(diffReport.Empty())
+	exitNormally(diffReport.Empty(), stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
 }
 
-func exitNormally(diffEmpty bool) {
+func exitNormally(diffEmpty bool, data *stats.Info) {
+	stats.Send(data)
+
 	if failOnDiff && !diffEmpty {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func exitWithError(data *stats.Info) {
+	stats.Send(data)
+	os.Exit(data.StatusCode)
 }
 
 func printYAML(output interface{}) error {
