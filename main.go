@@ -101,7 +101,8 @@ func main() {
 	)
 
 	if !validateFlags() {
-		exitWithError(stats.GetInfo(statusCodeInvalidFlags, config, base, revision, times, nil, nil))
+		exitWithError(statusCodeInvalidFlags,
+			stats.GetInfo(statusCodeInvalidFlags, config, base, revision, times, nil, nil))
 	}
 
 	loader := openapi3.NewLoader()
@@ -110,13 +111,15 @@ func main() {
 	s1, err := load.From(loader, base)
 	if err != nil {
 		fmt.Printf("failed to load base spec from %q with %v\n", base, err)
-		exitWithError(stats.GetInfo(statusCodeLoadBaseErr, config, base, revision, times, nil, err))
+		exitWithError(statusCodeLoadBaseErr,
+			stats.GetInfo(statusCodeLoadBaseErr, config, base, revision, times, nil, err))
 	}
 
 	s2, err := load.From(loader, revision)
 	if err != nil {
 		fmt.Printf("failed to load revision spec from %q with %v\n", revision, err)
-		exitWithError(stats.GetInfo(statusCodeLoadRevisionErr, config, base, revision, times, nil, err))
+		exitWithError(statusCodeLoadRevisionErr,
+			stats.GetInfo(statusCodeLoadRevisionErr, config, base, revision, times, nil, err))
 	}
 
 	times.Load, startTime = getTime(startTime)
@@ -127,13 +130,15 @@ func main() {
 
 	if err != nil {
 		fmt.Printf("diff failed with %v\n", err)
-		exitWithError(stats.GetInfo(statusCodeDiffErr, config, base, revision, times, nil, err))
+		exitWithError(statusCodeDiffErr,
+			stats.GetInfo(statusCodeDiffErr, config, base, revision, times, nil, err))
 	}
 
 	if summary {
 		if err = printYAML(diffReport.GetSummary()); err != nil {
 			fmt.Printf("failed to print summary with %v\n", err)
-			exitWithError(stats.GetInfo(statusCodeSummaryErr, config, base, revision, times, diffReport, err))
+			exitWithError(statusCodeSummaryErr,
+				stats.GetInfo(statusCodeSummaryErr, config, base, revision, times, diffReport, err))
 		}
 		exitNormally(diffReport.Empty(), &stats.Info{
 			Config: config,
@@ -144,7 +149,8 @@ func main() {
 	if format == formatYAML {
 		if err = printYAML(diffReport); err != nil {
 			fmt.Printf("failed to print diff YAML with %v\n", err)
-			exitWithError(stats.GetInfo(statusCodeYAMLErr, config, base, revision, times, diffReport, err))
+			exitWithError(statusCodeYAMLErr,
+				stats.GetInfo(statusCodeYAMLErr, config, base, revision, times, diffReport, err))
 		}
 	} else if format == formatText {
 		fmt.Printf("%s", report.GetTextReportAsString(diffReport))
@@ -152,12 +158,14 @@ func main() {
 		html, err := report.GetHTMLReportAsString(diffReport)
 		if err != nil {
 			fmt.Printf("failed to generate HTML diff report with %v\n", err)
-			exitWithError(stats.GetInfo(statusCodeReportErr, config, base, revision, times, diffReport, err))
+			exitWithError(statusCodeReportErr,
+				stats.GetInfo(statusCodeReportErr, config, base, revision, times, diffReport, err))
 		}
 		fmt.Printf("%s", html)
 	} else {
 		fmt.Printf("unknown output format %q\n", format)
-		exitWithError(stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
+		exitWithError(statusCodeInvalidFormat,
+			stats.GetInfo(statusCodeInvalidFormat, config, base, revision, times, diffReport, err))
 	}
 	times.Output, startTime = getTime(startTime)
 
@@ -173,9 +181,9 @@ func exitNormally(diffEmpty bool, data *stats.Info) {
 	os.Exit(0)
 }
 
-func exitWithError(data *stats.Info) {
+func exitWithError(statusCode int, data *stats.Info) {
 	stats.Send(data, statsServer)
-	os.Exit(data.StatusCode)
+	os.Exit(statusCode)
 }
 
 func printYAML(output interface{}) error {
